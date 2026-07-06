@@ -75,25 +75,27 @@ export async function getSessionMetadata(
 }
 
 export async function getStatus(repoRoot: string): Promise<GitStatusFile[]> {
-  const { stdout } = await git(["status", "--porcelain=v1"], { cwd: repoRoot });
-  return stdout
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => {
-      const indexStatus = line[0] ?? " ";
-      const worktreeStatus = line[1] ?? " ";
-      const rawPath = line.slice(3);
-      const [originalPath, path] = rawPath.includes(" -> ") ? rawPath.split(" -> ") : [undefined, rawPath];
-      return {
-        path: path ?? rawPath,
-        originalPath,
-        indexStatus,
-        worktreeStatus,
-        status: mapPorcelainStatus(indexStatus, worktreeStatus),
-        staged: indexStatus !== " " && indexStatus !== "?",
-        unstaged: worktreeStatus !== " " || indexStatus === "?",
-      };
+  const { stdout } = await git(["status", "--porcelain=v1", "-z"], { cwd: repoRoot });
+  const records = stdout.split("\0").filter(Boolean);
+  const files: GitStatusFile[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index] ?? "";
+    const indexStatus = record[0] ?? " ";
+    const worktreeStatus = record[1] ?? " ";
+    const path = record.slice(3);
+    const originalPath = indexStatus === "R" || worktreeStatus === "R" ? records[index + 1] : undefined;
+    if (originalPath) index += 1;
+    files.push({
+      path,
+      originalPath,
+      indexStatus,
+      worktreeStatus,
+      status: mapPorcelainStatus(indexStatus, worktreeStatus),
+      staged: indexStatus !== " " && indexStatus !== "?",
+      unstaged: worktreeStatus !== " " || indexStatus === "?",
     });
+  }
+  return files;
 }
 
 export async function getBranches(repoRoot: string): Promise<{ branches: GitBranch[]; current: string | null; upstream: string | null }> {

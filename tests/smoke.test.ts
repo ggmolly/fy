@@ -20,6 +20,8 @@ describe("smoke", () => {
     await git(repoPath, ["add", "README.md"]);
     await git(repoPath, ["commit", "-m", "initial"]);
     await writeFile(join(repoPath, "README.md"), "hello\nworld\n");
+    await writeFile(join(repoPath, "a name.txt"), "space path\n");
+    await git(repoPath, ["add", "a name.txt"]);
 
     const repo = await createRepoContext(repoPath, { mode: "working" });
     const app = createApp(repo);
@@ -28,6 +30,7 @@ describe("smoke", () => {
     expect(statusResponse.status).toBe(200);
     const status = (await statusResponse.json()) as { files: GitStatusFile[] };
     expect(status.files.some((file) => file.path === "README.md" && file.unstaged)).toBe(true);
+    expect(status.files.some((file) => file.path === "a name.txt" && file.staged)).toBe(true);
 
     const diffResponse = await app.request("/api/diff?working=true");
     expect(diffResponse.status).toBe(200);
