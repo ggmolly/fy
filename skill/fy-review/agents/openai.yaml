@@ -1,0 +1,4 @@
+interface:
+  display_name: "fy Review"
+  short_description: "Address local fy review comments"
+  default_prompt: "Use $fy-review to address local fy review comments in this repository."

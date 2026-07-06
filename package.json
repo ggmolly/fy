@@ -1,0 +1,33 @@
+{
+  "name": "fy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "fy": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "dev": "bun src/cli/index.ts --foreground --no-open",
+    "build": "tsc --noEmit && vite build && bun build src/cli/index.ts --target bun --outdir dist/cli --external @pierre/diffs --external react --external react-dom --external hono --external commander --external zod --external execa",
+    "check": "tsc --noEmit && bun test",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@pierre/diffs": "latest",
+    "@vitejs/plugin-react": "latest",
+    "commander": "latest",
+    "execa": "latest",
+    "hono": "latest",
+    "lucide-react": "^1.23.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "vite": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest"
+  }
+}
