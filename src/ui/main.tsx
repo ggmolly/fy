@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import type { CodeView as PierreCodeView } from "@pierre/diffs";
 import { CodeView, type CodeViewHandle, type CodeViewItem, type DiffLineAnnotation } from "@pierre/diffs/react";
 import {
+  ChevronLeft,
+  ChevronRight,
   Copy,
   FolderGit,
   GitBranch,
@@ -38,10 +40,14 @@ import { mergeRemoteReview, sameReview } from "./reviewSync";
 import type { CodeViewLineSelection, LoadState, PromptMode, ReviewLineAnnotation } from "./types";
 import "./styles.css";
 
+const defaultSidebarWidth = 320;
+const minSidebarWidth = 260;
+const maxSidebarWidth = 560;
 function App(): React.JSX.Element {
   const viewerRef = useRef<CodeViewHandle<ReviewLineAnnotation>>(null);
   const editingFindingIdsRef = useRef<Set<string>>(new Set());
   const skipNextReviewSaveRef = useRef(false);
+  const loadRequestIdRef = useRef(0);
   const [session, setSession] = useState<SessionMetadata | null>(null);
   const [refs, setRefs] = useState<GitRef[]>([]);
   const [diff, setDiff] = useState<DiffResponse | null>(null);
@@ -62,6 +68,40 @@ function App(): React.JSX.Element {
   const [promptMode, setPromptMode] = useState<PromptMode>("all");
   const [activeDiffParams, setActiveDiffParams] = useState("");
   const [needsReload, setNeedsReload] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(defaultSidebarWidth);
+  const workspaceStyle = { "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties;
+
+  const beginSidebarResize = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
+    if (sidebarCollapsed) return;
+    event.preventDefault();
+
+    const handle = event.currentTarget;
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+
+    handle.setPointerCapture(pointerId);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const resize = (moveEvent: PointerEvent): void => {
+      setSidebarWidth(Math.min(maxSidebarWidth, Math.max(minSidebarWidth, startWidth + moveEvent.clientX - startX)));
+    };
+    const stop = (): void => {
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("pointermove", resize);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+    };
+
+    window.addEventListener("pointermove", resize);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+  }, [sidebarCollapsed, sidebarWidth]);
+
 
   const loadRepo = useCallback(async () => {
     const [sessionResponse, refsResponse] = await Promise.all([
@@ -276,16 +316,21 @@ function App(): React.JSX.Element {
   }, [baseRef, headRef, refs]);
 
   async function loadDiff(params: URLSearchParams, expectedKey?: string): Promise<void> {
+    const requestId = ++loadRequestIdRef.current;
     setLoadState({ status: "loading", message: "Loading diff..." });
     try {
       const query = params.toString();
       const nextDiff = await api<DiffResponse>(`/api/diff${query ? `?${query}` : ""}`);
-      setDiff(nextDiff);
+      if (requestId !== loadRequestIdRef.current) return;
+
       const [nextReview, nextIndex, nextRules] = await Promise.all([
         api<ComparisonReviewState>(`/api/review?comparisonKey=${encodeURIComponent(expectedKey ?? nextDiff.comparisonKey)}`),
         api<{ viewedFileHashes: ViewedFileHashRecord[] }>("/api/review/viewed-index"),
         api<{ autoViewRules: string[] }>("/api/review/auto-view-rules"),
       ]);
+      if (requestId !== loadRequestIdRef.current) return;
+
+      setDiff(nextDiff);
       setReview(nextReview);
       setViewedHashIndex(nextIndex.viewedFileHashes);
       setAutoViewRules(nextRules.autoViewRules);
@@ -298,6 +343,7 @@ function App(): React.JSX.Element {
       setNeedsReload(false);
       setLoadState(nextDiff.raw.trim() === "" ? { status: "empty", message: "No diff for this selection." } : { status: "ready" });
     } catch (error) {
+      if (requestId !== loadRequestIdRef.current) return;
       setLoadState({ status: "error", message: error instanceof Error ? error.message : "Failed to load diff." });
     }
   }
@@ -332,6 +378,22 @@ function App(): React.JSX.Element {
     params.set("base", nextBase);
     params.set("head", nextHead);
     await loadDiff(params);
+  }
+
+  async function showUnstagedChanges(): Promise<void> {
+    const params = new URLSearchParams();
+    params.set("working", "true");
+    await loadDiff(params);
+  }
+
+  function selectBaseRef(nextBase: string): void {
+    setBaseRef(nextBase);
+    void applyComparison(nextBase, headRef);
+  }
+
+  function selectHeadRef(nextHead: string): void {
+    setHeadRef(nextHead);
+    void applyComparison(baseRef, nextHead);
   }
 
   const setFindingEditing = useCallback((id: string, editing: boolean): void => {
@@ -432,17 +494,18 @@ function App(): React.JSX.Element {
         <div className="controls">
           <label className="selectLabel">
             <span>Base:</span>
-            <select value={baseRef} onChange={(event) => setBaseRef(event.target.value)}>
+            <select value={baseRef} onChange={(event) => selectBaseRef(event.target.value)}>
               {refOptions.map((ref) => <option key={`${ref.kind}:${ref.name}`} value={ref.name}>{ref.name}</option>)}
             </select>
           </label>
           <span className="swapIcon">↔</span>
           <label className="selectLabel">
             <span>Head:</span>
-            <select value={headRef} onChange={(event) => setHeadRef(event.target.value)}>
+            <select value={headRef} onChange={(event) => selectHeadRef(event.target.value)}>
               {refOptions.map((ref) => <option key={`${ref.kind}:${ref.name}`} value={ref.name}>{ref.name}</option>)}
             </select>
           </label>
+          <button className={diff?.comparisonKey === "working" ? "active" : ""} title="Show unstaged working tree changes" onClick={() => void showUnstagedChanges()}>Unstaged</button>
           <button onClick={() => void applyComparison()}>Compare</button>
           <button className={needsReload ? "active" : ""} title="Refresh" onClick={() => void refreshCurrentDiff()}><RefreshCw size={15} /> {needsReload ? "Updated" : "Refresh"}</button>
           <div className="toolbarDivider" />
@@ -463,35 +526,68 @@ function App(): React.JSX.Element {
         </div>
       </header>
 
-      <section className="workspace">
-        <aside className="sidebar">
-          <div className="panelHeader">
-            <h2>Changed files</h2>
-            <span>{diff?.files.length ?? 0}</span>
-          </div>
-          <ReviewProgress progress={reviewProgress} />
-          <FileList
-            files={diff?.files ?? []}
-            viewedFiles={viewedFilePaths}
-            changedSinceViewedFiles={changedSinceViewedFiles}
-            commentCounts={commentCountsByFile}
-            activeFile={activeFile}
-            onSelect={(path) => {
-              setFocusedFile(path);
-              setSelectedLines(null);
-              setDraftSelection(null);
-              setFileDraftPath(null);
-              viewerRef.current?.scrollTo({ type: "item", id: path, behavior: "smooth-auto" });
-            }}
-            onToggleViewed={toggleFileViewed}
-            onToggleFolderViewed={toggleFolderViewed}
-          />
-          <AutoViewRulesEditor
-            value={autoViewRulesDraft}
-            onChange={setAutoViewRulesDraft}
-            onSave={() => void saveAutoViewRules(autoViewRulesDraft)}
-          />
+      <section className={sidebarCollapsed ? "workspace sidebarCollapsed" : "workspace"} style={workspaceStyle}>
+        <aside className={sidebarCollapsed ? "sidebar collapsed" : "sidebar"} aria-label="Changed files">
+          {sidebarCollapsed ? (
+            <div className="sidebarCollapsedContent">
+              <button title="Expand sidebar" onClick={() => setSidebarCollapsed(false)} aria-label="Expand changed files sidebar">
+                <ChevronRight size={16} />
+              </button>
+              <span className="sidebarCollapsedCount">{diff?.files.length ?? 0}</span>
+              <span className="sidebarCollapsedLabel">Files</span>
+            </div>
+          ) : (
+            <>
+              <div className="panelHeader sidebarHeader">
+                <h2>Changed files</h2>
+                <div className="sidebarHeaderActions">
+                  <span>{diff?.files.length ?? 0}</span>
+                  <button title="Collapse sidebar" onClick={() => setSidebarCollapsed(true)} aria-label="Collapse changed files sidebar">
+                    <ChevronLeft size={15} />
+                  </button>
+                </div>
+              </div>
+              <ReviewProgress progress={reviewProgress} />
+              <FileList
+                files={diff?.files ?? []}
+                viewedFiles={viewedFilePaths}
+                changedSinceViewedFiles={changedSinceViewedFiles}
+                commentCounts={commentCountsByFile}
+                activeFile={activeFile}
+                onSelect={(path) => {
+                  setFocusedFile(path);
+                  setSelectedLines(null);
+                  setDraftSelection(null);
+                  setFileDraftPath(null);
+                  viewerRef.current?.scrollTo({ type: "item", id: path, behavior: "smooth-auto" });
+                }}
+                onToggleViewed={toggleFileViewed}
+                onToggleFolderViewed={toggleFolderViewed}
+              />
+              <AutoViewRulesEditor
+                value={autoViewRulesDraft}
+                onChange={setAutoViewRulesDraft}
+                onSave={() => void saveAutoViewRules(autoViewRulesDraft)}
+              />
+            </>
+          )}
         </aside>
+        {!sidebarCollapsed && (
+          <div
+            className="sidebarResizeHandle"
+            role="separator"
+            aria-label="Resize changed files sidebar"
+            aria-orientation="vertical"
+            tabIndex={0}
+            onDoubleClick={() => setSidebarWidth(defaultSidebarWidth)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft") setSidebarWidth((current) => Math.min(maxSidebarWidth, Math.max(minSidebarWidth, current - 24)));
+              if (event.key === "ArrowRight") setSidebarWidth((current) => Math.min(maxSidebarWidth, Math.max(minSidebarWidth, current + 24)));
+              if (event.key === "Enter") setSidebarWidth(defaultSidebarWidth);
+            }}
+            onPointerDown={beginSidebarResize}
+          />
+        )}
 
         <section className="diffPane">
           {message && <div className="message">{message}</div>}

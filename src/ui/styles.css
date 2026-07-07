@@ -189,8 +189,12 @@ button:disabled {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(260px, 20vw) minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width, 320px) 8px minmax(0, 1fr);
   height: calc(100vh - 53px);
+}
+
+.workspace.sidebarCollapsed {
+  grid-template-columns: 46px minmax(0, 1fr);
 }
 
 .sidebar {
@@ -199,6 +203,81 @@ button:disabled {
   min-width: 0;
   overflow: auto;
   padding: 14px;
+}
+
+.sidebar.collapsed {
+  overflow: hidden;
+  padding: 8px 6px;
+}
+
+.sidebarResizeHandle {
+  align-items: stretch;
+  cursor: col-resize;
+  display: flex;
+  justify-content: center;
+  min-width: 8px;
+  outline: none;
+  position: relative;
+}
+
+.sidebarResizeHandle::after {
+  background: var(--border);
+  content: "";
+  transition: background 140ms ease, width 140ms ease;
+  width: 1px;
+}
+
+.sidebarResizeHandle:hover::after,
+.sidebarResizeHandle:focus-visible::after {
+  background: var(--accent);
+  width: 2px;
+}
+
+.sidebarHeader {
+  gap: 10px;
+}
+
+.sidebarHeaderActions {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.sidebarHeaderActions button {
+  height: 26px;
+  padding: 0 7px;
+}
+
+.sidebarCollapsedContent {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebarCollapsedContent button {
+  height: 30px;
+  padding: 0;
+  width: 30px;
+}
+
+.sidebarCollapsedCount {
+  background: var(--panel-3);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  min-width: 24px;
+  padding: 3px 6px;
+  text-align: center;
+}
+
+.sidebarCollapsedLabel {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
 }
 
 h2,
@@ -442,11 +521,20 @@ h3 {
   white-space: nowrap;
 }
 
+.folderRow > button:first-child span:not(.fileBadge) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .counts {
   display: inline-flex;
+  flex: none;
   gap: 4px;
   justify-content: flex-end;
   min-width: 58px;
+  white-space: nowrap;
 }
 
 .countAddition {
