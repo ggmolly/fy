@@ -22,6 +22,7 @@ describe("smoke", () => {
     await writeFile(join(repoPath, "README.md"), "hello\nworld\n");
     await writeFile(join(repoPath, "a name.txt"), "space path\n");
     await git(repoPath, ["add", "a name.txt"]);
+    await writeFile(join(repoPath, "notes.txt"), "draft\n");
 
     const repo = await createRepoContext(repoPath, { mode: "working" });
     const app = createApp(repo);
@@ -36,7 +37,9 @@ describe("smoke", () => {
     expect(diffResponse.status).toBe(200);
     const diff = (await diffResponse.json()) as DiffResponse;
     expect(diff.raw).toContain("+world");
-    expect(diff.files).toEqual([
+    expect(diff.raw).toContain("+draft");
+    expect(diff.files).toHaveLength(2);
+    expect(diff.files).toEqual(expect.arrayContaining([
       expect.objectContaining({
         path: "README.md",
         additions: 1,
@@ -44,8 +47,16 @@ describe("smoke", () => {
         contentHash: expect.any(String),
         isGenerated: false,
       }),
-    ]);
-    expect(diff.files[0]?.contentHash).not.toBe("");
+      expect.objectContaining({
+        path: "notes.txt",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        contentHash: expect.any(String),
+        isGenerated: false,
+      }),
+    ]));
+    expect(diff.files.every((file) => file.contentHash !== "")).toBe(true);
 
     const blobResponse = await app.request("/api/blob?path=README.md&ref=working");
     expect(blobResponse.status).toBe(200);

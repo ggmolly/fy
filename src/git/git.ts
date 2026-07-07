@@ -201,9 +201,9 @@ async function resolveDiffSource(repo: RepoContext, params: URLSearchParams): Pr
   if (staged) return { key: "staged", args: ["diff", "--staged"] };
   if (working && base) {
     assertSafeRef(base);
-    return { key: `${base}...working`, args: ["diff", base] };
+    return { key: `${base}...working`, args: [], raw: await getWorkingTreeDiff(repo.repoRoot, base) };
   }
-  if (working) return { key: "working", args: ["diff"] };
+  if (working) return { key: "working", args: [], raw: await getWorkingTreeDiff(repo.repoRoot) };
   if (base && head) {
     assertSafeRef(base);
     assertSafeRef(head);
@@ -229,7 +229,7 @@ async function getInitialDiffSource(repo: RepoContext): Promise<{ key: string; a
     if (!initialSource.patchPath) throw new GitUserError("missing patch path");
     return { key: `patch-${initialSource.patchPath}`, args: [], raw: await Bun.file(initialSource.patchPath).text() };
   }
-  return { key: "working", args: ["diff"] };
+  return { key: "working", args: [], raw: await getWorkingTreeDiff(repo.repoRoot) };
 }
 
 async function runDiffCommand(repoRoot: string, args: string[]): Promise<string> {
@@ -241,6 +241,25 @@ async function runDiffCommand(repoRoot: string, args: string[]): Promise<string>
   } catch (error) {
     throw commandError(command, error);
   }
+}
+
+async function getWorkingTreeDiff(repoRoot: string, base?: string): Promise<string> {
+  const [trackedDiff, untrackedFiles] = await Promise.all([
+    runDiffCommand(repoRoot, base ? ["diff", base] : ["diff"]),
+    git(["ls-files", "--others", "--exclude-standard", "-z"], { cwd: repoRoot }),
+  ]);
+  const untrackedDiffs = await Promise.all(
+    untrackedFiles.stdout.split("\0").filter(Boolean).map((path) => getUntrackedFileDiff(repoRoot, path)),
+  );
+  return [trackedDiff, ...untrackedDiffs].filter((part) => part.trim() !== "").join("\n");
+}
+
+async function getUntrackedFileDiff(repoRoot: string, path: string): Promise<string> {
+  const result = await execa("git", ["diff", "--no-index", "--", "/dev/null", path], { cwd: repoRoot, reject: false });
+  if (result.exitCode !== 0 && result.exitCode !== 1) {
+    throw new GitUserError(`git failed: ${result.stderr || result.stdout || `unexpected exit code ${result.exitCode}`}`);
+  }
+  return result.stdout;
 }
 
 async function git(args: string[], options: Options): Promise<{ stdout: string }> {
