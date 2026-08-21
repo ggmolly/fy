@@ -9,10 +9,12 @@ import { createAgentCommand } from "./agent";
 
 interface CliOptions {
   base?: string;
+  head?: string;
   pr?: string;
   repo: string;
   staged?: boolean;
   working?: boolean;
+  untracked?: boolean;
   patch?: string;
   open?: boolean;
   foreground?: boolean;
@@ -22,11 +24,13 @@ interface CliOptions {
 const program = new Command()
   .name("fy")
   .description("fy - local diff review powered by Pierre Computer Diffs")
-  .option("--base <ref>", "review git diff <ref>...HEAD")
+  .option("--base <ref>", "base ref for the initial comparison")
+  .option("--head <ref>", "head ref for the initial comparison")
   .option("--pr <number-or-url>", "review a GitHub PR using gh")
   .option("--repo <path>", "repo to inspect", process.cwd())
   .option("--staged", "review staged changes")
   .option("--working", "review unstaged working tree changes")
+  .option("--no-untracked", "exclude untracked files from working tree comparisons")
   .option("--patch <path>", "review an existing patch file")
   .option("--no-open", "do not open a browser")
   .option("--foreground", "keep the server in the foreground", true)
@@ -78,15 +82,18 @@ program.parseAsync().catch((error) => {
 });
 
 async function getInitialSource(options: CliOptions): Promise<InitialSource> {
-  const selected = [options.pr, options.patch, options.staged, options.working, options.base].filter(Boolean);
+  const comparison = options.base || options.head;
+  const selected = [options.pr, options.patch, options.staged, options.working, comparison].filter(Boolean);
   if (selected.length > 1) {
-    throw new InvalidArgumentError("choose only one initial source: --pr, --patch, --staged, --working, or --base");
+    throw new InvalidArgumentError("choose only one initial source: --pr, --patch, --staged, --working, or --base/--head");
   }
-  if (options.pr) return { mode: "pr", pr: parsePr(options.pr) };
-  if (options.patch) return { mode: "patch", patchPath: await validatePatchPath(options.patch) };
-  if (options.staged) return { mode: "staged" };
-  if (options.base) return { mode: "base", base: options.base };
-  return { mode: "working" };
+
+  const includeUntracked = options.untracked !== false;
+  if (options.pr) return { mode: "pr", pr: parsePr(options.pr), includeUntracked };
+  if (options.patch) return { mode: "patch", patchPath: await validatePatchPath(options.patch), includeUntracked };
+  if (options.staged) return { mode: "staged", includeUntracked };
+  if (comparison) return { mode: "base", base: options.base, head: options.head, includeUntracked };
+  return { mode: "working", includeUntracked };
 }
 
 function parsePort(value: string): number {

@@ -13,9 +13,12 @@ export function getPreviewKind(path: string): "image" | "markdown" | "notebook" 
 }
 
 export function resolvePreviewRefs(comparisonKey: string): PreviewRefs {
-  if (comparisonKey === "working" || comparisonKey === "staged") return { baseRef: "HEAD", targetRef: "working" };
-  if (comparisonKey.endsWith("...working")) {
-    return { baseRef: comparisonKey.slice(0, -"...working".length), targetRef: "working" };
+  if (comparisonKey === "working" || comparisonKey === "working-no-untracked" || comparisonKey === "staged") {
+    return { baseRef: "HEAD", targetRef: "working" };
+  }
+  if (comparisonKey.endsWith("...working") || comparisonKey.endsWith("...working-no-untracked")) {
+    const suffix = comparisonKey.endsWith("...working-no-untracked") ? "...working-no-untracked" : "...working";
+    return { baseRef: comparisonKey.slice(0, -suffix.length), targetRef: "working" };
   }
   if (comparisonKey.startsWith("commit-")) {
     const sha = comparisonKey.slice("commit-".length);

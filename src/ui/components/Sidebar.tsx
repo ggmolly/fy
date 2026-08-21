@@ -266,10 +266,9 @@ function FileTreeNode({
 }
 
 function buildFileTree(files: DiffFileSummary[]): { nodes: FileTreeNode[]; files: DiffFileSummary[] } {
-  const visibleFiles = files;
   const root: MutableFolder = { kind: "folder", path: "", name: "", children: new Map(), files: [] };
 
-  for (const file of visibleFiles) {
+  for (const file of files) {
     let current = root;
     current.files.push(file);
     const parts = file.path.split("/");
@@ -288,7 +287,7 @@ function buildFileTree(files: DiffFileSummary[]): { nodes: FileTreeNode[]; files
     }
   }
 
-  return { nodes: sortTreeNodes([...root.children.values()]).map(compactSingleFolder), files: visibleFiles };
+  return { nodes: sortTreeNodes([...root.children.values()]).map(compactSingleFolder), files };
 }
 
 function matchesSidebarFilters(

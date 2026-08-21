@@ -17,6 +17,9 @@ export interface SessionMetadata {
   currentBranch: string | null;
   upstreamBranch: string | null;
   defaultBase: string | null;
+  initialBaseRef: string;
+  initialHeadRef: string;
+  includeUntracked: boolean;
   sourceMode: SourceMode;
   sourceLabel: string;
   comparisonKey: string;

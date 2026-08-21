@@ -90,11 +90,10 @@ export function createApp(repo: RepoContext): Hono {
             if (lastDiffHash && nextDiffHash !== lastDiffHash) {
               const payload = { comparisonKey: diff.comparisonKey, changedAt };
               send("diff-changed", payload);
-              send("reload", payload);
             }
             lastDiffHash = nextDiffHash;
 
-            const review = await loadReview(repo.repoRoot, repo.sessionId, diff.comparisonKey);
+            const review = await loadReview(repo.repoRoot, diff.comparisonKey);
             const nextReviewHash = hashJsonPayload(review);
             if (lastReviewHash && nextReviewHash !== lastReviewHash) {
               send("review-changed", { comparisonKey: review.comparisonKey, updatedAt: review.updatedAt, changedAt });
@@ -146,12 +145,12 @@ export function createApp(repo: RepoContext): Hono {
 
   app.get("/api/review", async (c) => {
     const comparisonKey = c.req.query("comparisonKey") ?? repo.session.comparisonKey;
-    return c.json(await loadReview(repo.repoRoot, repo.sessionId, comparisonKey));
+    return c.json(await loadReview(repo.repoRoot, comparisonKey));
   });
 
   app.post("/api/review", async (c) => {
     const body = comparisonReviewSchema.parse(await c.req.json());
-    return c.json(await saveReview(repo.repoRoot, repo.sessionId, body));
+    return c.json(await saveReview(repo.repoRoot, body));
   });
 
   app.get("/api/review/viewed-index", async (c) => c.json({ viewedFileHashes: await loadViewedFileHashIndex(repo.repoRoot) }));
@@ -179,7 +178,7 @@ export function createApp(repo: RepoContext): Hono {
     const body = z.object({ comparisonKey: z.string().min(1) }).parse(await c.req.json().catch(() => ({})));
     const params = paramsFromComparisonKey(body.comparisonKey);
     const diff = await acquireDiff(repo, params);
-    const review = await loadReview(repo.repoRoot, repo.sessionId, body.comparisonKey);
+    const review = await loadReview(repo.repoRoot, body.comparisonKey);
     return c.json(await exportReview(repo.repoRoot, repo.session, review, diff));
   });
 
@@ -317,12 +316,18 @@ async function isFile(path: string): Promise<boolean> {
 
 function paramsFromComparisonKey(comparisonKey: string): URLSearchParams {
   const params = new URLSearchParams();
-  if (comparisonKey === "working") params.set("working", "true");
-  else if (comparisonKey === "staged") params.set("staged", "true");
-  else if (comparisonKey.startsWith("commit-")) params.set("commit", comparisonKey.slice("commit-".length));
-  else if (comparisonKey.endsWith("...working")) {
-    params.set("base", comparisonKey.slice(0, -"...working".length));
+  if (comparisonKey === "working" || comparisonKey === "working-no-untracked") {
     params.set("working", "true");
+    if (comparisonKey === "working-no-untracked") params.set("untracked", "false");
+  } else if (comparisonKey === "staged") {
+    params.set("staged", "true");
+  } else if (comparisonKey.startsWith("commit-")) {
+    params.set("commit", comparisonKey.slice("commit-".length));
+  } else if (comparisonKey.endsWith("...working") || comparisonKey.endsWith("...working-no-untracked")) {
+    const suffix = comparisonKey.endsWith("...working-no-untracked") ? "...working-no-untracked" : "...working";
+    params.set("base", comparisonKey.slice(0, -suffix.length));
+    params.set("working", "true");
+    if (suffix === "...working-no-untracked") params.set("untracked", "false");
   } else if (comparisonKey.includes("...")) {
     const [base, head] = comparisonKey.split("...");
     if (base) params.set("base", base);

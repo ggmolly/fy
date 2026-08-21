@@ -57,6 +57,7 @@ function App(): React.JSX.Element {
   const [autoViewRulesDraft, setAutoViewRulesDraft] = useState("");
   const [baseRef, setBaseRef] = useState("origin/main");
   const [headRef, setHeadRef] = useState("HEAD");
+  const [includeUntracked, setIncludeUntracked] = useState(true);
   const [selectedLines, setSelectedLines] = useState<CodeViewLineSelection | null>(null);
   const [draftSelection, setDraftSelection] = useState<CodeViewLineSelection | null>(null);
   const [fileDraftPath, setFileDraftPath] = useState<string | null>(null);
@@ -110,8 +111,9 @@ function App(): React.JSX.Element {
     ]);
     setSession(sessionResponse);
     setRefs(refsResponse.refs);
-    setBaseRef(sessionResponse.defaultBase ?? sessionResponse.upstreamBranch ?? "origin/main");
-    setHeadRef(sessionResponse.currentBranch ?? "HEAD");
+    setBaseRef(sessionResponse.initialBaseRef);
+    setHeadRef(sessionResponse.initialHeadRef);
+    setIncludeUntracked(sessionResponse.includeUntracked);
     await loadDiff(new URLSearchParams(), sessionResponse.comparisonKey);
   }, []);
 
@@ -147,7 +149,6 @@ function App(): React.JSX.Element {
       void loadRemoteReview(payload.comparisonKey);
     };
     source.addEventListener("diff-changed", markDiffStale);
-    source.addEventListener("reload", markDiffStale);
     source.addEventListener("review-changed", syncReview);
     source.addEventListener("error", () => source.close());
     return () => source.close();
@@ -380,10 +381,18 @@ function App(): React.JSX.Element {
     await loadDiff(params);
   }
 
-  async function showUnstagedChanges(): Promise<void> {
+  async function showUnstagedChanges(nextIncludeUntracked = includeUntracked): Promise<void> {
     const params = new URLSearchParams();
     params.set("working", "true");
+    if (!nextIncludeUntracked) params.set("untracked", "false");
     await loadDiff(params);
+  }
+  function toggleUntracked(): void {
+    const nextIncludeUntracked = !includeUntracked;
+    setIncludeUntracked(nextIncludeUntracked);
+    if (diff?.comparisonKey === "working" || diff?.comparisonKey === "working-no-untracked") {
+      void showUnstagedChanges(nextIncludeUntracked);
+    }
   }
 
   function selectBaseRef(nextBase: string): void {
@@ -505,7 +514,8 @@ function App(): React.JSX.Element {
               {refOptions.map((ref) => <option key={`${ref.kind}:${ref.name}`} value={ref.name}>{ref.name}</option>)}
             </select>
           </label>
-          <button className={diff?.comparisonKey === "working" ? "active" : ""} title="Show unstaged working tree changes" onClick={() => void showUnstagedChanges()}>Unstaged</button>
+          <button className={diff?.comparisonKey === "working" || diff?.comparisonKey === "working-no-untracked" ? "active" : ""} title="Show unstaged working tree changes" onClick={() => void showUnstagedChanges()}>Unstaged</button>
+          <button className={includeUntracked ? "active" : ""} aria-pressed={includeUntracked} title="Include untracked files in working tree comparisons" onClick={toggleUntracked}>Untracked</button>
           <button onClick={() => void applyComparison()}>Compare</button>
           <button className={needsReload ? "active" : ""} title="Refresh" onClick={() => void refreshCurrentDiff()}><RefreshCw size={15} /> {needsReload ? "Updated" : "Refresh"}</button>
           <div className="toolbarDivider" />

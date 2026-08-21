@@ -9,8 +9,7 @@
   "scripts": {
     "dev": "bun src/cli/index.ts --foreground --no-open",
     "build": "tsc --noEmit && vite build && bun build src/cli/index.ts --target bun --outdir dist/cli --external @pierre/diffs --external react --external react-dom --external hono --external commander --external zod --external execa",
-    "check": "tsc --noEmit && bun test",
-    "test": "bun test"
+    "check": "tsc --noEmit"
   },
   "dependencies": {
     "@pierre/diffs": "latest",

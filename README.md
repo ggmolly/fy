@@ -107,9 +107,8 @@ UI comments are created as `molly`. Agent replies default to `codex`.
 - `POST /api/review/auto-view-rules`
 - `POST /api/open-in-editor`
 - `GET /api/watch?working=true` streams local live events for the selected diff
-  query without sending diff contents in the event payload. `diff-changed`
-  marks the refresh button, `reload` is kept as a compatibility alias for diff
-  changes, and `review-changed` tells the UI to reload review comments.
+  query without sending diff contents in the event payload. `diff-changed` marks
+  the refresh button, and `review-changed` tells the UI to reload review comments.
 
 ## Development
 

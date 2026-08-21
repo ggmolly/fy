@@ -18,6 +18,8 @@ import { parseDiff, summarizeDiff } from "./diffParser";
 export interface InitialSource {
   mode: SourceMode;
   base?: string;
+  head?: string;
+  includeUntracked?: boolean;
   pr?: number;
   patchPath?: string;
 }
@@ -60,12 +62,17 @@ export async function getSessionMetadata(
     initialSource.mode === "pr" && initialSource.pr != null ? getPrMetadata(repoRoot, initialSource.pr) : Promise.resolve(undefined),
   ]);
 
+  const initialBaseRef = initialSource.base ?? defaultBase ?? upstreamBranch ?? "origin/main";
+  const initialHeadRef = initialSource.head ?? currentBranch ?? "HEAD";
   return {
     sessionId,
     repoRoot,
     currentBranch,
     upstreamBranch,
     defaultBase,
+    initialBaseRef,
+    initialHeadRef,
+    includeUntracked: initialSource.includeUntracked !== false,
     sourceMode: initialSource.mode,
     sourceLabel: getSourceLabel(initialSource),
     comparisonKey: getInitialComparisonKey(initialSource, defaultBase),
@@ -137,16 +144,14 @@ export async function getRemotes(repoRoot: string): Promise<GitRemote[]> {
 }
 
 export async function getRefs(repoRoot: string): Promise<GitRef[]> {
-  const [branches, tags, current, upstream] = await Promise.all([
+  const [{ branches, current, upstream }, tags] = await Promise.all([
     getBranches(repoRoot),
     git(["tag", "--list"], { cwd: repoRoot }),
-    getCurrentBranch(repoRoot),
-    getUpstreamBranch(repoRoot),
   ]);
   const refs: GitRef[] = [{ name: "HEAD", kind: "head" }];
   if (upstream) refs.push({ name: upstream, kind: "upstream" });
   refs.push(
-    ...branches.branches.map((branch): GitRef => ({
+    ...branches.map((branch): GitRef => ({
       name: branch.name,
       kind: branch.name === current ? "head" : branch.kind,
     })),
@@ -189,6 +194,7 @@ async function resolveDiffSource(repo: RepoContext, params: URLSearchParams): Pr
   const commit = params.get("commit");
   const working = params.get("working") === "true";
   const staged = params.get("staged") === "true";
+  const includeUntracked = params.get("untracked") !== "false";
 
   if ([Boolean(commit), staged, working, Boolean(base || head)].filter(Boolean).length > 1 && !(base && working && !head)) {
     throw new GitUserError("choose one diff mode: commit, staged, working, or base/head");
@@ -201,9 +207,19 @@ async function resolveDiffSource(repo: RepoContext, params: URLSearchParams): Pr
   if (staged) return { key: "staged", args: ["diff", "--staged"] };
   if (working && base) {
     assertSafeRef(base);
-    return { key: `${base}...working`, args: [], raw: await getWorkingTreeDiff(repo.repoRoot, base) };
+    return {
+      key: workingComparisonKey(base, includeUntracked),
+      args: [],
+      raw: await getWorkingTreeDiff(repo.repoRoot, base, includeUntracked),
+    };
   }
-  if (working) return { key: "working", args: [], raw: await getWorkingTreeDiff(repo.repoRoot) };
+  if (working) {
+    return {
+      key: workingComparisonKey(undefined, includeUntracked),
+      args: [],
+      raw: await getWorkingTreeDiff(repo.repoRoot, undefined, includeUntracked),
+    };
+  }
   if (base && head) {
     assertSafeRef(base);
     assertSafeRef(head);
@@ -218,38 +234,44 @@ async function getInitialDiffSource(repo: RepoContext): Promise<{ key: string; a
   if (initialSource.mode === "staged") return { key: "staged", args: ["diff", "--staged"] };
   if (initialSource.mode === "base") {
     const base = initialSource.base ?? repo.session.defaultBase ?? "origin/main";
+    const head = initialSource.head ?? "HEAD";
     assertSafeRef(base);
-    return { key: `${base}...HEAD`, args: ["diff", `${base}...HEAD`] };
+    assertSafeRef(head);
+    return { key: `${base}...${head}`, args: ["diff", `${base}...${head}`] };
   }
   if (initialSource.mode === "pr") {
     if (initialSource.pr == null) throw new GitUserError("missing PR number");
-    return { key: `pr-${initialSource.pr}`, args: ["pr", "diff", String(initialSource.pr), "--patch"] };
+    return { key: `pr-${initialSource.pr}`, args: ["pr", "diff", String(initialSource.pr)] };
   }
   if (initialSource.mode === "patch") {
     if (!initialSource.patchPath) throw new GitUserError("missing patch path");
     return { key: `patch-${initialSource.patchPath}`, args: [], raw: await Bun.file(initialSource.patchPath).text() };
   }
-  return { key: "working", args: [], raw: await getWorkingTreeDiff(repo.repoRoot) };
+  const includeUntracked = initialSource.includeUntracked !== false;
+  return {
+    key: workingComparisonKey(undefined, includeUntracked),
+    args: [],
+    raw: await getWorkingTreeDiff(repo.repoRoot, undefined, includeUntracked),
+  };
 }
 
 async function runDiffCommand(repoRoot: string, args: string[]): Promise<string> {
   const command = args[0] === "pr" ? "gh" : "git";
-  const commandArgs = command === "gh" ? args : args;
   try {
-    const { stdout } = await execa(command, commandArgs, { cwd: repoRoot, reject: true });
+    const { stdout } = await execa(command, args, { cwd: repoRoot, reject: true });
     return stdout;
   } catch (error) {
     throw commandError(command, error);
   }
 }
 
-async function getWorkingTreeDiff(repoRoot: string, base?: string): Promise<string> {
-  const [trackedDiff, untrackedFiles] = await Promise.all([
-    runDiffCommand(repoRoot, base ? ["diff", base] : ["diff"]),
-    git(["ls-files", "--others", "--exclude-standard", "-z"], { cwd: repoRoot }),
-  ]);
+async function getWorkingTreeDiff(repoRoot: string, base?: string, includeUntracked = true): Promise<string> {
+  const trackedDiff = await runDiffCommand(repoRoot, base ? ["diff", base] : ["diff"]);
+  if (!includeUntracked) return trackedDiff;
+
+  const { stdout } = await git(["ls-files", "--others", "--exclude-standard", "-z"], { cwd: repoRoot });
   const untrackedDiffs = await Promise.all(
-    untrackedFiles.stdout.split("\0").filter(Boolean).map((path) => getUntrackedFileDiff(repoRoot, path)),
+    stdout.split("\0").filter(Boolean).map((path) => getUntrackedFileDiff(repoRoot, path)),
   );
   return [trackedDiff, ...untrackedDiffs].filter((part) => part.trim() !== "").join("\n");
 }
@@ -335,17 +357,23 @@ async function getPrMetadata(repoRoot: string, pr: number): Promise<SessionMetad
 }
 
 function getSourceLabel(source: InitialSource): string {
-  if (source.mode === "base") return `base ${source.base ?? "default"}...HEAD`;
+  if (source.mode === "base") return `base ${source.base ?? "default"}...${source.head ?? "HEAD"}`;
   if (source.mode === "pr") return `PR #${source.pr}`;
   if (source.mode === "patch") return `patch ${source.patchPath}`;
+  if (source.mode === "working" && source.includeUntracked === false) return "working (tracked only)";
   return source.mode;
 }
 
 function getInitialComparisonKey(source: InitialSource, defaultBase: string | null): string {
-  if (source.mode === "base") return `${source.base ?? defaultBase ?? "origin/main"}...HEAD`;
+  if (source.mode === "base") return `${source.base ?? defaultBase ?? "origin/main"}...${source.head ?? "HEAD"}`;
   if (source.mode === "pr") return `pr-${source.pr}`;
   if (source.mode === "patch") return `patch-${source.patchPath}`;
+  if (source.mode === "working") return workingComparisonKey(undefined, source.includeUntracked !== false);
   return source.mode;
+}
+function workingComparisonKey(base: string | undefined, includeUntracked: boolean): string {
+  const target = includeUntracked ? "working" : "working-no-untracked";
+  return base ? `${base}...${target}` : target;
 }
 
 function mapPorcelainStatus(indexStatus: string, worktreeStatus: string): GitStatusFile["status"] {

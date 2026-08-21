@@ -77,19 +77,16 @@ const storeSchema = z.object({
   autoViewRules: z.array(z.string()).default(defaultAutoViewRules()),
 });
 
-export async function loadReview(repoRoot: string, sessionId: string, comparisonKey: string): Promise<ComparisonReviewState> {
-  void sessionId;
+export async function loadReview(repoRoot: string, comparisonKey: string): Promise<ComparisonReviewState> {
   const store = await loadReviewStore(repoRoot);
   return store.comparisons[comparisonKey] ?? createEmptyReview(comparisonKey);
 }
 
-export async function saveReview(repoRoot: string, sessionId: string, state: ComparisonReviewState): Promise<ComparisonReviewState> {
-  void sessionId;
-  const parsed = comparisonReviewSchema.parse(state);
+export async function saveReview(repoRoot: string, state: ComparisonReviewState): Promise<ComparisonReviewState> {
   const store = await loadReviewStore(repoRoot);
-  store.comparisons[parsed.comparisonKey] = parsed;
-  await saveReviewStore(repoRoot, store);
-  return parsed;
+  store.comparisons[state.comparisonKey] = state;
+  const saved = await saveReviewStore(repoRoot, store);
+  return saved.comparisons[state.comparisonKey];
 }
 
 export async function loadViewedFileHashIndex(repoRoot: string): Promise<ViewedFileHashRecord[]> {
@@ -97,11 +94,9 @@ export async function loadViewedFileHashIndex(repoRoot: string): Promise<ViewedF
 }
 
 export async function saveViewedFileHashIndex(repoRoot: string, records: ViewedFileHashRecord[]): Promise<ViewedFileHashRecord[]> {
-  const parsed = viewedFileHashIndexSchema.parse({ viewedFileHashes: records }).viewedFileHashes;
   const store = await loadReviewStore(repoRoot);
-  store.viewedFileHashes = trimViewedFileHashes(parsed);
-  await saveReviewStore(repoRoot, store);
-  return store.viewedFileHashes;
+  store.viewedFileHashes = trimViewedFileHashes(records);
+  return (await saveReviewStore(repoRoot, store)).viewedFileHashes;
 }
 
 export async function loadAutoViewRules(repoRoot: string): Promise<string[]> {
@@ -109,11 +104,9 @@ export async function loadAutoViewRules(repoRoot: string): Promise<string[]> {
 }
 
 export async function saveAutoViewRules(repoRoot: string, rules: string[]): Promise<string[]> {
-  const parsed = autoViewRulesSchema.parse({ autoViewRules: rules }).autoViewRules;
   const store = await loadReviewStore(repoRoot);
-  store.autoViewRules = dedupeRules(parsed);
-  await saveReviewStore(repoRoot, store);
-  return store.autoViewRules;
+  store.autoViewRules = dedupeRules(rules);
+  return (await saveReviewStore(repoRoot, store)).autoViewRules;
 }
 
 export async function exportReview(
